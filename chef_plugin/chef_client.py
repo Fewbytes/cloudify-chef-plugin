@@ -63,6 +63,9 @@ COMMON_DIRS = {
     'role_path': 'roles',
 }
 
+INSECURE_DIRS = ['backup', 'handler']  # Modify below if you remove 'handler'
+SECURE_DIRS_ROOT = 'secure'
+
 
 class SudoError(Exception):
 
@@ -170,6 +173,9 @@ class ChefManager(object):
 
     def get_path(self, *p):
         """ Get absolute path to a file under Chef root """
+        if p:
+            if (p[0] not in INSECURE_DIRS) and (p[0] != SECURE_DIRS_ROOT):
+                p = (SECURE_DIRS_ROOT,) + p
         return os.path.join(self.get_chef_data_root(), *p)
 
     def install(self):
@@ -215,7 +221,8 @@ class ChefManager(object):
     def install_files(self):
         dirs = map(self.get_path, self.DIRS.values() + ['etc', 'log'])
         self._sudo("mkdir", "-p", *dirs)
-        self._sudo("chmod", "700", self.get_chef_data_root())
+        self._sudo("chmod", "755", self.get_chef_data_root())
+        self._sudo("chmod", "700", self.get_path(SECURE_DIRS_ROOT))
         self.install_chef_handler()
 
     def install_chef_handler(self):
@@ -424,10 +431,11 @@ class ChefClientManager(ChefManager):
             'validation_client_name "{validation_client_name}"\n'
             'chef_server_url        "{chef_server_url}"\n'
             'environment            "{environment}"\n'
-            'validation_key         "{chef_data_root}/etc/validation.pem"\n'
-            'client_key             "{chef_data_root}/etc/client.pem"\n'
-            'log_location           "{chef_data_root}/log/client.log"\n'
-            'pid_file               "{chef_data_root}/client.pid"\n'
+            'validation_key         "{chef_data_root}'
+            '/secure/etc/validation.pem"\n'
+            'client_key             "{chef_data_root}/secure/etc/client.pem"\n'
+            'log_location           "{chef_data_root}/secure/log/client.log"\n'
+            'pid_file               "{chef_data_root}/secure/client.pid"\n'
             'Chef::Log::Formatter.show_time = true\n'.format(
                 node_name=node_name,
                 chef_data_root=chef_data_root,
@@ -487,6 +495,8 @@ class ChefSoloManager(ChefManager):
         command_list = [
             'sudo',
             'tar', '-C', dst_dir,
+            '--no-same-owner',
+            '--no-same-permissions',
             '--xform', 's#^' + os.path.basename(dst_dir) + '/##',
             '-xzf', temp_archive.name]
         try:
@@ -512,25 +522,11 @@ class ChefSoloManager(ChefManager):
     def _prepare_for_run(self, runlist):
         ctx = self.ctx
         cc = ctx.properties['chef_config']
-        file_name = self.get_path(SOLO_COOKBOOKS_FILE)
-        for dl in 'environments', 'data_bags', 'roles':
+        for dl in 'cookbooks', 'data_bags', 'roles', 'environments':
             self._url_to_dir(cc.get(dl), self.get_path(dl))
-        is_resource, path = is_resource_url(cc['cookbooks'])
-        if is_resource:
-            ctx.logger.info("Getting Chef cookbooks resource {0} to {1}"
-                            .format(path, file_name))
-            resource_local_file = ctx.download_resource(path)
-            self._sudo("cp", resource_local_file, file_name)
-            os.remove(resource_local_file)
-        else:
-            ctx.logger.info("Downloading Chef cookbooks from {0} to {1}"
-                            .format(cc['cookbooks'], file_name))
-            data = requests.get(cc['cookbooks']).content
-            self._sudo_write_file(file_name, data)
 
     def _get_cmd(self, runlist):
         ctx = self.ctx
-        cookbooks_file_path = self.get_path(SOLO_COOKBOOKS_FILE)
         cmd = ["chef-solo"]
 
         if (ctx.properties['chef_config'].get('environment', '_default')
@@ -546,7 +542,6 @@ class ChefSoloManager(ChefManager):
             "-o", runlist,
             "-j", self.attribute_file.name,
             "--force-formatter",
-            "-r", cookbooks_file_path
         ]
         return cmd
 
@@ -562,8 +557,8 @@ class ChefSoloManager(ChefManager):
         self._sudo_write_file(
             self.get_path('etc', 'solo.rb'),
             self.get_chef_common_config() +
-            'log_location           "{chef_data_root}/log/solo.log"\n'
-            'pid_file               "{chef_data_root}/solo.pid"\n'
+            'log_location           "{chef_data_root}/secure/log/solo.log"\n'
+            'pid_file               "{chef_data_root}/secure/solo.pid"\n'
             'Chef::Log::Formatter.show_time = true\n'.format(
                 chef_data_root=self.get_chef_data_root(),
                 **ctx.properties['chef_config']))
