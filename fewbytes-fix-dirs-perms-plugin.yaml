@@ -43,7 +43,7 @@ plugins:
     chef_plugin:
         derived_from: cloudify.plugins.agent_plugin
         properties:
-            url: https://github.com/Fewbytes/cloudify-chef-plugin/archive/fix-dirs-perms.zip
+            url: https://github.com/Fewbytes/cloudify-chef-plugin/archive/with-plugin-yaml.zip
 
 types:
     cloudify.types.chef.middleware_server:
